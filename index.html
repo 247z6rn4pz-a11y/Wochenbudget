@@ -88,6 +88,21 @@
   .shop-row:last-child{border-bottom:none;}
   .shop-row.checking{opacity:0; transform:translateX(30px);}
   .shop-check{width:24px; height:24px; border-radius:50%; border:2px solid var(--text-tertiary); flex-shrink:0; background:none; display:flex; align-items:center; justify-content:center; color:#fff; font-size:13px;}
+  .qty-btn{width:36px; height:36px; border-radius:50%; background:var(--fill); border:none; font-size:20px; font-weight:600; color:var(--accent); flex-shrink:0;}
+  .qty-row-controls{display:flex; align-items:center; gap:6px; flex-shrink:0;}
+  .qty-mini{width:26px; height:26px; border-radius:50%; background:var(--fill); border:none; font-size:15px; color:var(--text); flex-shrink:0;}
+  .qty-mini-val{min-width:16px; text-align:center; font-size:14px; font-weight:700; font-variant-numeric:tabular-nums;}
+  .qty-value-input, .qty-mini-input{
+    border:none; background:none; color:var(--text); font-variant-numeric:tabular-nums; text-align:center;
+    -moz-appearance:textfield;
+  }
+  .qty-value-input::-webkit-inner-spin-button, .qty-value-input::-webkit-outer-spin-button,
+  .qty-mini-input::-webkit-inner-spin-button, .qty-mini-input::-webkit-outer-spin-button{
+    -webkit-appearance:none; margin:0;
+  }
+  .qty-value-input{font-size:20px; font-weight:700; width:44px;}
+  .qty-mini-input{font-size:14px; font-weight:700; width:22px;}
+  .qty-value-input:focus, .qty-mini-input:focus{outline:none; color:var(--accent);}
   .shop-row .shop-text{flex:1; font-size:16px;}
   .shop-row .shop-meta{font-size:11px; color:var(--text-tertiary);}
   .suggest-box{position:absolute; left:0; right:0; top:calc(100% + 4px); background:var(--bg-elevated); border-radius:var(--radius-sm); box-shadow:var(--shadow); z-index:5; overflow:hidden;}
@@ -248,6 +263,14 @@
           <div class="suggest-box hidden" id="shopStoreSuggestions"></div>
         </div>
         <div class="chip-row" id="storeChips" style="margin-top:10px;"></div>
+
+        <label class="field-label">Menge</label>
+        <div style="display:flex; align-items:center; gap:16px; margin-bottom:6px;">
+          <button type="button" class="qty-btn" id="qtyMinusBtn">−</button>
+          <input type="number" id="qtyValue" class="qty-value-input" value="1" min="1" inputmode="numeric">
+          <button type="button" class="qty-btn" id="qtyPlusBtn">+</button>
+        </div>
+
         <button class="btn-primary" id="addShopItemBtn">Hinzufügen</button>
       </div>
       <div class="card">
@@ -436,6 +459,7 @@
     currentMonthKey: monthKey(new Date()),
     statsRange: 'week',
     pendingType: 'ausgabe',
+    pendingQty: 1,
     pendingCat: null,
     pendingPerson: null
   };
@@ -698,13 +722,31 @@
         var metaParts = [];
         if (item.addedBy) metaParts.push('von '+escapeHtml(item.addedBy));
         if (item.ort) metaParts.push('🏬 '+escapeHtml(item.ort));
+        var qty = item.menge || 1;
         row.innerHTML =
           '<button class="shop-check" data-check="'+item.id+'"></button>'+
           '<div style="flex:1;"><div class="shop-text">'+escapeHtml(item.text)+'</div>'+
-          (metaParts.length ? '<div class="shop-meta">'+metaParts.join(' · ')+'</div>' : '')+'</div>';
+          (metaParts.length ? '<div class="shop-meta">'+metaParts.join(' · ')+'</div>' : '')+'</div>'+
+          '<div class="qty-row-controls">'+
+            '<button class="qty-mini" data-qty-minus="'+item.id+'">−</button>'+
+            '<input type="number" class="qty-mini-input" data-qty-input="'+item.id+'" value="'+qty+'" min="1" inputmode="numeric">'+
+            '<button class="qty-mini" data-qty-plus="'+item.id+'">+</button>'+
+          '</div>';
         listEl.appendChild(row);
       });
     }
+  }
+  function adjustQty(id, delta){
+    var item = state.shoppingItems.find(function(it){ return it.id === id; });
+    if (!item) return;
+    var newQty = (item.menge || 1) + delta;
+    if (newQty < 1) newQty = 1;
+    state.db.doc('shoppingList/'+id).update({menge: newQty}).catch(function(e){ console.error(e); });
+  }
+  function setQtyAbsolute(id, val){
+    var n = parseInt(val, 10);
+    if (isNaN(n) || n < 1) n = 1;
+    state.db.doc('shoppingList/'+id).update({menge: n}).catch(function(e){ console.error(e); });
   }
   function renderStoreChips(){
     var box = document.getElementById('storeChips');
@@ -741,23 +783,45 @@
     var contains = list.filter(function(n){ return starts.indexOf(n)<0 && n.toLowerCase().indexOf(val)>=0 && n.toLowerCase()!==val; });
     return starts.concat(contains).slice(0,5);
   }
+  function setPendingQty(n){
+    state.pendingQty = Math.max(1, n);
+    document.getElementById('qtyValue').value = state.pendingQty;
+  }
   function addShopItem(){
     var inp = document.getElementById('shopItemInput');
     var storeInp = document.getElementById('shopStoreInput');
     var text = inp.value.trim();
     if (!text) return;
     var ort = storeInp.value.trim();
+    var qty = state.pendingQty || 1;
     ensureMeDefault();
-    var entry = { text: text, ort: ort, addedBy: state.me || '', createdAt: new Date().toISOString() };
-    state.db.collection('shoppingList').add(entry).then(function(){
+
+    var existing = state.shoppingItems.find(function(it){
+      return it.text.trim().toLowerCase() === text.toLowerCase();
+    });
+
+    var afterSave = function(){
       inp.value = ''; storeInp.value = ''; inp.focus();
+      setPendingQty(1);
       document.getElementById('shopItemSuggestions').classList.add('hidden');
       document.getElementById('shopStoreSuggestions').classList.add('hidden');
       var fv = firebase.firestore.FieldValue;
       var payload = { itemNames: fv.arrayUnion(text) };
       if (ort) payload.stores = fv.arrayUnion(ort);
       state.db.doc('shoppingMeta/history').set(payload, {merge:true}).catch(function(e){ console.error(e); });
-    }).catch(function(e){ console.error(e); toast('Fehler beim Speichern'); });
+    };
+
+    if (existing){
+      state.db.doc('shoppingList/'+existing.id).update({
+        menge: (existing.menge || 1) + qty,
+        ort: ort || existing.ort || ""
+      }).then(function(){ toast('Menge erhöht'); afterSave(); })
+        .catch(function(e){ console.error(e); toast('Fehler beim Speichern'); });
+    } else {
+      var entry = { text: text, ort: ort, menge: qty, addedBy: state.me || '', createdAt: new Date().toISOString() };
+      state.db.collection('shoppingList').add(entry).then(afterSave)
+        .catch(function(e){ console.error(e); toast('Fehler beim Speichern'); });
+    }
   }
   function checkOffItem(id){
     var row = document.querySelector('.shop-row[data-id="'+id+'"]');
@@ -988,8 +1052,23 @@
     if (val){ document.getElementById('shopStoreInput').value = val; this.classList.add('hidden'); this.innerHTML=''; }
   });
   document.getElementById('shoppingListEl').addEventListener('click', function(e){
-    var id = e.target.getAttribute('data-check');
-    if (id) checkOffItem(id);
+    var checkId = e.target.getAttribute('data-check');
+    if (checkId){ checkOffItem(checkId); return; }
+    var minusId = e.target.getAttribute('data-qty-minus');
+    if (minusId){ adjustQty(minusId, -1); return; }
+    var plusId = e.target.getAttribute('data-qty-plus');
+    if (plusId){ adjustQty(plusId, 1); return; }
+  });
+  document.getElementById('qtyMinusBtn').addEventListener('click', function(){ setPendingQty((state.pendingQty||1) - 1); });
+  document.getElementById('qtyPlusBtn').addEventListener('click', function(){ setPendingQty((state.pendingQty||1) + 1); });
+  document.getElementById('qtyValue').addEventListener('focus', function(){ this.select(); });
+  document.getElementById('qtyValue').addEventListener('change', function(){ setPendingQty(parseInt(this.value,10) || 1); });
+  document.getElementById('shoppingListEl').addEventListener('focusin', function(e){
+    if (e.target.classList.contains('qty-mini-input')) e.target.select();
+  });
+  document.getElementById('shoppingListEl').addEventListener('change', function(e){
+    var id = e.target.getAttribute('data-qty-input');
+    if (id) setQtyAbsolute(id, e.target.value);
   });
   document.getElementById('weeklyAmountInput').addEventListener('change', function(){ updateWeeklyAmount(this.value); });
   document.getElementById('addCatBtn').addEventListener('click', function(){
