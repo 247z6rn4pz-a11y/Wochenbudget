@@ -84,6 +84,18 @@
   .list-row .del{background:none;border:none;color:var(--accent-red); font-size:13px; padding:4px 6px; flex-shrink:0;}
   .empty{text-align:center; color:var(--text-tertiary); font-size:14px; padding:24px 0;}
 
+  .shop-row{display:flex; align-items:center; gap:12px; padding:12px 0; border-bottom:0.5px solid var(--separator); transition:opacity 0.35s ease, transform 0.35s ease;}
+  .shop-row:last-child{border-bottom:none;}
+  .shop-row.checking{opacity:0; transform:translateX(30px);}
+  .shop-check{width:24px; height:24px; border-radius:50%; border:2px solid var(--text-tertiary); flex-shrink:0; background:none; display:flex; align-items:center; justify-content:center; color:#fff; font-size:13px;}
+  .shop-row .shop-text{flex:1; font-size:16px;}
+  .shop-row .shop-meta{font-size:11px; color:var(--text-tertiary);}
+  .suggest-box{position:absolute; left:0; right:0; top:calc(100% + 4px); background:var(--bg-elevated); border-radius:var(--radius-sm); box-shadow:var(--shadow); z-index:5; overflow:hidden;}
+  .suggest-item{padding:11px 14px; font-size:15px; border-bottom:0.5px solid var(--separator);}
+  .suggest-item:last-child{border-bottom:none;}
+  .suggest-item:active{background:var(--fill);}
+  .field-wrap{position:relative;}
+
   .tabbar{
     position:fixed; bottom:0; left:0; right:0; z-index:20;
     display:flex; justify-content:space-around;
@@ -222,6 +234,29 @@
       <button class="btn-secondary" id="exportCsvBtn">⬇︎ Als CSV exportieren</button>
     </section>
 
+    <!-- TAB: EINKAUFSLISTE -->
+    <section id="tab-shopping" class="hidden">
+      <div class="card">
+        <h2>Neuer Artikel</h2>
+        <div class="field-wrap">
+          <input type="text" class="std" id="shopItemInput" placeholder="z. B. Milch" autocomplete="off">
+          <div class="suggest-box hidden" id="shopItemSuggestions"></div>
+        </div>
+        <label class="field-label">Wo besorgen (optional)</label>
+        <div class="field-wrap">
+          <input type="text" class="std" id="shopStoreInput" placeholder="z. B. Edeka" autocomplete="off">
+          <div class="suggest-box hidden" id="shopStoreSuggestions"></div>
+        </div>
+        <div class="chip-row" id="storeChips" style="margin-top:10px;"></div>
+        <button class="btn-primary" id="addShopItemBtn">Hinzufügen</button>
+      </div>
+      <div class="card">
+        <h2>Zu besorgen</h2>
+        <div id="shoppingListEl"></div>
+        <div class="empty hidden" id="shoppingEmpty">Nichts vorgemerkt 🎉</div>
+      </div>
+    </section>
+
     <!-- TAB: EINSTELLUNGEN -->
     <section id="tab-settings" class="hidden">
       <div class="card">
@@ -280,6 +315,10 @@
     <button class="tab-btn" data-tab="stats">
       <svg viewBox="0 0 24 24" fill="currentColor"><path d="M5 20h2v-8H5v8zm6 0h2V8h-2v12zm6 0h2v-5h-2v5zM4 22h16v-1H4v1z"/></svg>
       Auswertung
+    </button>
+    <button class="tab-btn" data-tab="shopping">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 18c-1.1 0-1.99.9-1.99 2S5.9 22 7 22s2-.9 2-2-.9-2-2-2zM1 2v2h2l3.6 7.59-1.35 2.45c-.16.28-.25.61-.25.96 0 1.1.9 2 2 2h12v-2H7.42c-.14 0-.25-.11-.25-.25l.03-.12L8.1 13h7.45c.75 0 1.41-.41 1.75-1.03L20.88 5H5.21l-.94-2H1zM17 18c-1.1 0-1.99.9-1.99 2s.89 2 1.99 2 2-.9 2-2-.9-2-2-2z"/></svg>
+      Einkauf
     </button>
     <button class="tab-btn" data-tab="settings">
       <svg viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94a7.14 7.14 0 000-1.88l2.03-1.58a.5.5 0 00.12-.64l-1.92-3.32a.5.5 0 00-.6-.22l-2.39.96a7.1 7.1 0 00-1.63-.94L14.4 2.8a.5.5 0 00-.5-.4h-3.84a.5.5 0 00-.5.4l-.36 2.52a7.1 7.1 0 00-1.63.94l-2.39-.96a.5.5 0 00-.6.22L2.66 8.84a.5.5 0 00.12.64l2.03 1.58a7.14 7.14 0 000 1.88l-2.03 1.58a.5.5 0 00-.12.64l1.92 3.32a.5.5 0 00.6.22l2.39-.96c.5.4 1.05.71 1.63.94l.36 2.52a.5.5 0 00.5.4h3.84a.5.5 0 00.5-.4l.36-2.52a7.1 7.1 0 001.63-.94l2.39.96a.5.5 0 00.6-.22l1.92-3.32a.5.5 0 00-.12-.64l-2.03-1.58zM12 15.5a3.5 3.5 0 110-7 3.5 3.5 0 010 7z"/></svg>
@@ -624,6 +663,110 @@
     if (!state.me && b && (b.people||[]).length){ state.me = b.people[0]; }
   }
 
+  // ---------- EINKAUFSLISTE (global, unabhängig vom Budget) ----------
+  var DEFAULT_STORES = ["Edeka","Marktkauf","Picnic","dm","Rossmann"];
+  state.shoppingItems = [];
+  state.knownItems = [];
+  state.knownStores = [];
+
+  function subscribeShoppingList(){
+    state.db.collection('shoppingList').orderBy('createdAt','asc').onSnapshot(function(snap){
+      state.shoppingItems = snap.docs.map(function(d){ var data=d.data(); data.id=d.id; return data; });
+      renderShoppingList();
+    }, function(err){ console.error('shoppingList snapshot error', err); });
+  }
+  function subscribeShoppingHistory(){
+    state.db.doc('shoppingMeta/history').onSnapshot(function(doc){
+      var d = doc.exists ? doc.data() : {};
+      state.knownItems = d.itemNames || [];
+      state.knownStores = d.stores || [];
+      renderStoreChips();
+    }, function(err){ console.error('shoppingMeta snapshot error', err); });
+  }
+  function renderShoppingList(){
+    var listEl = document.getElementById('shoppingListEl');
+    var emptyEl = document.getElementById('shoppingEmpty');
+    listEl.innerHTML = "";
+    if (state.shoppingItems.length === 0){
+      emptyEl.classList.remove('hidden');
+    } else {
+      emptyEl.classList.add('hidden');
+      state.shoppingItems.forEach(function(item){
+        var row = document.createElement('div');
+        row.className = 'shop-row';
+        row.dataset.id = item.id;
+        var metaParts = [];
+        if (item.addedBy) metaParts.push('von '+escapeHtml(item.addedBy));
+        if (item.ort) metaParts.push('🏬 '+escapeHtml(item.ort));
+        row.innerHTML =
+          '<button class="shop-check" data-check="'+item.id+'"></button>'+
+          '<div style="flex:1;"><div class="shop-text">'+escapeHtml(item.text)+'</div>'+
+          (metaParts.length ? '<div class="shop-meta">'+metaParts.join(' · ')+'</div>' : '')+'</div>';
+        listEl.appendChild(row);
+      });
+    }
+  }
+  function renderStoreChips(){
+    var box = document.getElementById('storeChips');
+    box.innerHTML = "";
+    var seen = {};
+    var all = [];
+    DEFAULT_STORES.concat(state.knownStores).forEach(function(s){
+      var key = s.trim().toLowerCase();
+      if (!key || seen[key]) return;
+      seen[key] = true;
+      all.push(s);
+    });
+    all.slice(0,12).forEach(function(s){
+      var chip = document.createElement('button');
+      chip.className = 'chip';
+      chip.textContent = s;
+      chip.onclick = function(){ document.getElementById('shopStoreInput').value = s; };
+      box.appendChild(chip);
+    });
+  }
+  function showSuggestions(boxId, matches, targetInputId){
+    var box = document.getElementById(boxId);
+    if (!matches.length){ box.classList.add('hidden'); box.innerHTML=''; return; }
+    box.innerHTML = matches.map(function(m){
+      return '<div class="suggest-item" data-val="'+escapeHtml(m)+'">'+escapeHtml(m)+'</div>';
+    }).join('');
+    box.classList.remove('hidden');
+    box.dataset.target = targetInputId;
+  }
+  function filterKnown(list, val){
+    val = val.trim().toLowerCase();
+    if (!val) return [];
+    var starts = list.filter(function(n){ return n.toLowerCase().indexOf(val)===0 && n.toLowerCase()!==val; });
+    var contains = list.filter(function(n){ return starts.indexOf(n)<0 && n.toLowerCase().indexOf(val)>=0 && n.toLowerCase()!==val; });
+    return starts.concat(contains).slice(0,5);
+  }
+  function addShopItem(){
+    var inp = document.getElementById('shopItemInput');
+    var storeInp = document.getElementById('shopStoreInput');
+    var text = inp.value.trim();
+    if (!text) return;
+    var ort = storeInp.value.trim();
+    ensureMeDefault();
+    var entry = { text: text, ort: ort, addedBy: state.me || '', createdAt: new Date().toISOString() };
+    state.db.collection('shoppingList').add(entry).then(function(){
+      inp.value = ''; storeInp.value = ''; inp.focus();
+      document.getElementById('shopItemSuggestions').classList.add('hidden');
+      document.getElementById('shopStoreSuggestions').classList.add('hidden');
+      var fv = firebase.firestore.FieldValue;
+      var payload = { itemNames: fv.arrayUnion(text) };
+      if (ort) payload.stores = fv.arrayUnion(ort);
+      state.db.doc('shoppingMeta/history').set(payload, {merge:true}).catch(function(e){ console.error(e); });
+    }).catch(function(e){ console.error(e); toast('Fehler beim Speichern'); });
+  }
+  function checkOffItem(id){
+    var row = document.querySelector('.shop-row[data-id="'+id+'"]');
+    if (row) row.classList.add('checking');
+    setTimeout(function(){
+      state.db.doc('shoppingList/'+id).delete().catch(function(e){ console.error(e); });
+    }, 320);
+  }
+
   // ---------- ADD ENTRY SHEET ----------
   function openSheet(){
     var b = currentBudget();
@@ -784,7 +927,7 @@
 
   // ---------- TABS / EVENTS ----------
   function showTab(name){
-    ['home','stats','settings'].forEach(function(t){
+    ['home','stats','shopping','settings'].forEach(function(t){
       document.getElementById('tab-'+t).classList.toggle('hidden', t!==name);
     });
     document.querySelectorAll('.tab-btn').forEach(function(btn){
@@ -820,6 +963,34 @@
     });
   });
   document.getElementById('exportCsvBtn').addEventListener('click', exportCsv);
+  document.getElementById('addShopItemBtn').addEventListener('click', addShopItem);
+  document.getElementById('shopItemInput').addEventListener('keydown', function(e){
+    if (e.key === 'Enter'){ addShopItem(); }
+  });
+  document.getElementById('shopItemInput').addEventListener('input', function(){
+    showSuggestions('shopItemSuggestions', filterKnown(state.knownItems, this.value), 'shopItemInput');
+  });
+  document.getElementById('shopItemInput').addEventListener('blur', function(){
+    setTimeout(function(){ document.getElementById('shopItemSuggestions').classList.add('hidden'); }, 150);
+  });
+  document.getElementById('shopStoreInput').addEventListener('input', function(){
+    showSuggestions('shopStoreSuggestions', filterKnown(state.knownStores, this.value), 'shopStoreInput');
+  });
+  document.getElementById('shopStoreInput').addEventListener('blur', function(){
+    setTimeout(function(){ document.getElementById('shopStoreSuggestions').classList.add('hidden'); }, 150);
+  });
+  document.getElementById('shopItemSuggestions').addEventListener('mousedown', function(e){
+    var val = e.target.getAttribute('data-val');
+    if (val){ document.getElementById('shopItemInput').value = val; this.classList.add('hidden'); this.innerHTML=''; }
+  });
+  document.getElementById('shopStoreSuggestions').addEventListener('mousedown', function(e){
+    var val = e.target.getAttribute('data-val');
+    if (val){ document.getElementById('shopStoreInput').value = val; this.classList.add('hidden'); this.innerHTML=''; }
+  });
+  document.getElementById('shoppingListEl').addEventListener('click', function(e){
+    var id = e.target.getAttribute('data-check');
+    if (id) checkOffItem(id);
+  });
   document.getElementById('weeklyAmountInput').addEventListener('change', function(){ updateWeeklyAmount(this.value); });
   document.getElementById('addCatBtn').addEventListener('click', function(){
     var inp = document.getElementById('newCatInput'); addCategory(inp.value); inp.value='';
@@ -854,6 +1025,8 @@
       state.db = firebase.firestore();
       document.getElementById('syncDot').classList.remove('off');
       subscribeBudgets();
+      subscribeShoppingList();
+      subscribeShoppingHistory();
     } catch(e){
       console.error(e);
       toast('Verbindung zur Datenbank fehlgeschlagen');
