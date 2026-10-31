@@ -81,6 +81,8 @@
   .list-row .amount{font-size:15px; font-weight:700; font-variant-numeric:tabular-nums; flex-shrink:0;}
   .list-row .amount.planned{color:var(--accent-orange);}
   .list-row .amount.spent{color:var(--text);}
+  .list-row .paid{background:rgba(52,199,89,0.15); border:none; color:#1f8a3d; font-size:12px; font-weight:700; padding:6px 9px; border-radius:12px; flex-shrink:0; white-space:nowrap;}
+  .list-row .paid:active{opacity:0.6;}
   .list-row .del{background:none;border:none;color:var(--accent-red); font-size:13px; padding:4px 6px; flex-shrink:0;}
   .empty{text-align:center; color:var(--text-tertiary); font-size:14px; padding:24px 0;}
 
@@ -182,6 +184,26 @@
   .toast{position:fixed; top:calc(var(--safe-top) + 10px); left:50%; transform:translateX(-50%) translateY(-60px); background:var(--text); color:var(--bg); padding:10px 18px; border-radius:20px; font-size:13px; font-weight:600; z-index:60; transition:transform 0.3s; box-shadow:var(--shadow);}
   .toast.show{transform:translateX(-50%) translateY(0);}
 
+  .week-nav{display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:12px;}
+  .week-nav .wn-title{flex:1; text-align:center; min-width:0;}
+  .week-nav h2{margin:0;}
+  .week-nav .week-range{margin-top:2px;}
+  .wn-btn{width:34px; height:34px; border-radius:50%; border:none; background:var(--fill); color:var(--accent); font-size:18px; font-weight:600; flex-shrink:0;}
+  .wn-btn:active{opacity:0.6;}
+  .wn-today{display:block; margin:0 auto 12px; background:none; border:none; color:var(--accent); font-size:13px; font-weight:600; padding:2px 8px;}
+  input[type=date].std{
+    width:100%; background:var(--fill-secondary); border:none; border-radius:var(--radius-sm); padding:12px 14px; font-size:16px; color:var(--text);
+    font-family:inherit; min-height:46px; -webkit-appearance:none; appearance:none;
+  }
+  input[type=date].std:focus{outline:2px solid var(--accent); outline-offset:-1px;}
+  .date-hint{font-size:12px; color:var(--text-tertiary); margin-top:6px; line-height:1.4;}
+  .date-hint.future{color:var(--accent-orange);}
+  .upcoming-row{display:flex; align-items:center; justify-content:space-between; gap:10px; padding:11px 0; border-bottom:0.5px solid var(--separator); background:none; border-left:none; border-right:none; border-top:none; width:100%; text-align:left; color:var(--text); font-family:inherit;}
+  .upcoming-row:last-child{border-bottom:none;}
+  .upcoming-row .u-title{font-size:15px; font-weight:600;}
+  .upcoming-row .u-sub{font-size:12px; color:var(--text-secondary); margin-top:1px;}
+  .upcoming-row .u-amt{font-size:15px; font-weight:700; color:var(--accent-orange); font-variant-numeric:tabular-nums; flex-shrink:0;}
+  .upcoming-row .u-chev{color:var(--text-tertiary); font-size:16px; margin-left:4px;}
   .sync-dot{width:7px; height:7px; border-radius:50%; background:var(--accent-green); display:inline-block; margin-left:6px;}
   .sync-dot.off{background:var(--text-tertiary);}
 </style>
@@ -199,7 +221,15 @@
     <!-- TAB: ÜBERSICHT -->
     <section id="tab-home">
       <div class="card">
-        <h2 id="weekLabel">Diese Woche</h2>
+        <div class="week-nav">
+          <button class="wn-btn" id="weekPrevBtn" aria-label="Vorherige Woche">‹</button>
+          <div class="wn-title">
+            <h2 id="weekLabel">Diese Woche</h2>
+            <div class="week-range" id="weekRange"></div>
+          </div>
+          <button class="wn-btn" id="weekNextBtn" aria-label="Nächste Woche">›</button>
+        </div>
+        <button class="wn-today hidden" id="weekTodayBtn">Zurück zu dieser Woche</button>
         <div class="ring-row">
           <div class="ring">
             <svg viewBox="0 0 120 120">
@@ -217,12 +247,16 @@
             <div class="stat-row"><span class="label"><span class="dot" style="background:var(--accent-orange)"></span>Vorgemerkt</span><span class="val" id="statPlanned">0€</span></div>
           </div>
         </div>
-        <div class="week-range" id="weekRange"></div>
       </div>
 
       <div class="card">
-        <h2>Einträge diese Woche</h2>
+        <h2 id="weekListTitle">Einträge diese Woche</h2>
         <div id="weekList"></div>
+      </div>
+
+      <div class="card hidden" id="upcomingCard">
+        <h2>Kommende Wochen · Vormerkungen</h2>
+        <div id="upcomingList"></div>
       </div>
     </section>
 
@@ -370,6 +404,16 @@
   <label class="field-label">Für was</label>
   <input type="text" class="std" id="zweckInput" placeholder="Kurze Notiz (optional)">
 
+  <label class="field-label">Datum</label>
+  <input type="date" class="std" id="datumInput">
+  <div class="chip-row" id="datumChips" style="margin-top:8px;">
+    <button type="button" class="chip" data-weeks="0">Heute</button>
+    <button type="button" class="chip" data-weeks="1">+1 Wo.</button>
+    <button type="button" class="chip" data-weeks="2">+2 Wo.</button>
+    <button type="button" class="chip" data-weeks="4">+4 Wo.</button>
+  </div>
+  <div class="date-hint" id="datumHint"></div>
+
   <label class="field-label">Kategorie</label>
   <div class="chip-row" id="catChips"></div>
 
@@ -428,16 +472,45 @@
     return date.getUTCFullYear() + "-W" + String(weekNo).padStart(2,'0');
   }
   function monthKey(d){ return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,'0'); }
-  function weekRangeLabel(key){
-    // key like 2026-W38 -> compute Monday..Sunday
+  function pad2(n){ return String(n).padStart(2,'0'); }
+  function toISODate(d){ return d.getFullYear()+"-"+pad2(d.getMonth()+1)+"-"+pad2(d.getDate()); }
+  function parseISODate(str){
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(str||"");
+    return m ? new Date(parseInt(m[1],10), parseInt(m[2],10)-1, parseInt(m[3],10)) : null;
+  }
+  // Montag der ISO-Woche (Woche 1 = Woche mit dem 4. Januar)
+  function weekMonday(key){
     var parts = key.split("-W");
     var year = parseInt(parts[0],10), week = parseInt(parts[1],10);
-    var simple = new Date(Date.UTC(year,0,1 + (week-1)*7));
-    var dow = simple.getUTCDay() || 7;
-    var monday = new Date(simple); monday.setUTCDate(simple.getUTCDate() - dow + 1);
-    var sunday = new Date(monday); sunday.setUTCDate(monday.getUTCDate()+6);
+    var jan4 = new Date(year,0,4);
+    var dow = jan4.getDay() || 7;
+    var mon = new Date(year,0,4-(dow-1));
+    mon.setDate(mon.getDate() + (week-1)*7);
+    return mon;
+  }
+  function shiftWeekKey(key, delta){
+    var m = weekMonday(key);
+    m.setDate(m.getDate() + 7*delta);
+    return isoWeekKey(m);
+  }
+  function weekDiffFromNow(key){
+    var a = weekMonday(isoWeekKey(new Date())), b = weekMonday(key);
+    return Math.round((b - a) / (7*86400000));
+  }
+  function weekNo(key){ return parseInt(key.split("-W")[1],10); }
+  function weekRangeLabel(key){
+    var monday = weekMonday(key);
+    var sunday = new Date(monday); sunday.setDate(monday.getDate()+6);
     var opts = {day:'2-digit', month:'2-digit'};
     return monday.toLocaleDateString('de-DE',opts) + " – " + sunday.toLocaleDateString('de-DE',opts);
+  }
+  function weekTitle(key){
+    var d = weekDiffFromNow(key), kw = "KW " + weekNo(key);
+    if (d === 0) return "Diese Woche · " + kw;
+    if (d === 1) return "Nächste Woche · " + kw;
+    if (d === -1) return "Letzte Woche · " + kw;
+    if (d > 1) return "In " + d + " Wochen · " + kw;
+    return "Vor " + (-d) + " Wochen · " + kw;
   }
   function toast(msg){
     var t = document.getElementById('toast');
@@ -459,6 +532,7 @@
     currentMonthKey: monthKey(new Date()),
     statsRange: 'week',
     pendingType: 'ausgabe',
+    pendingDate: toISODate(new Date()),
     pendingQty: 1,
     pendingCat: null,
     pendingPerson: null
@@ -470,6 +544,10 @@
   function renderHome(){
     var b = currentBudget();
     document.getElementById('weekRange').textContent = weekRangeLabel(state.currentWeekKey);
+    var wDiff = weekDiffFromNow(state.currentWeekKey);
+    document.getElementById('weekLabel').textContent = weekTitle(state.currentWeekKey);
+    document.getElementById('weekListTitle').textContent = wDiff === 0 ? 'Einträge diese Woche' : 'Einträge in KW ' + weekNo(state.currentWeekKey);
+    document.getElementById('weekTodayBtn').classList.toggle('hidden', wDiff === 0);
     var weekly = b ? (b.weeklyAmount || 0) : 0;
     var weekEntries = state.entries.filter(function(e){ return e.weekKey === state.currentWeekKey; });
     var spent = weekEntries.filter(function(e){return e.typ==='ausgabe';}).reduce(function(s,e){return s+e.amount;},0);
@@ -490,22 +568,61 @@
     var listEl = document.getElementById('weekList');
     listEl.innerHTML = "";
     if (weekEntries.length === 0){
-      listEl.innerHTML = '<div class="empty">Noch keine Einträge diese Woche</div>';
+      listEl.innerHTML = '<div class="empty">' + (wDiff > 0 ? 'Noch nichts vorgemerkt – über ＋ kannst du hier Ausgaben vormerken' : 'Noch keine Einträge in dieser Woche') + '</div>';
     } else {
-      weekEntries.slice().sort(function(a,b2){return (b2.createdAt||"").localeCompare(a.createdAt||"");}).forEach(function(e){
+      weekEntries.slice().sort(function(a,b2){
+        return ((b2.datum||"") + (b2.createdAt||"")).localeCompare((a.datum||"") + (a.createdAt||""));
+      }).forEach(function(e){
         var row = document.createElement('div');
         row.className = 'list-row';
-        var d = e.createdAt ? new Date(e.createdAt) : null;
+        var d = e.datum ? parseISODate(e.datum) : (e.createdAt ? new Date(e.createdAt) : null);
         var dateStr = d ? d.toLocaleDateString('de-DE',{weekday:'short', day:'2-digit', month:'2-digit'}) : "";
         row.innerHTML =
           '<div class="cat-icon" style="background:var(--fill)">'+iconFor(e.kategorie)+'</div>'+
           '<div class="meta"><div class="title">'+escapeHtml(e.ort || e.kategorie)+'</div>'+
           '<div class="sub">'+escapeHtml(e.person||'')+' · '+dateStr+(e.zweck? ' · '+escapeHtml(e.zweck):'')+(e.typ==='vormerkung'?' · vorgemerkt':'')+'</div></div>'+
           '<div class="amount '+(e.typ==='vormerkung'?'planned':'spent')+'">'+(e.typ==='vormerkung'?'~ ':'')+fmtEUR(e.amount)+'</div>'+
+          (e.typ==='vormerkung' && e.weekKey <= isoWeekKey(new Date()) ? '<button class="paid" data-paid="'+e.id+'" title="Als bezahlt markieren">✓ bezahlt</button>' : '')+
           '<button class="del" data-id="'+e.id+'">✕</button>';
         listEl.appendChild(row);
       });
     }
+    renderUpcoming();
+  }
+
+  // Übersicht der kommenden Wochen mit Vormerkungen (alles nach der aktuellen Kalenderwoche)
+  function renderUpcoming(){
+    var b = currentBudget();
+    var weekly = b ? (b.weeklyAmount || 0) : 0;
+    var nowKey = isoWeekKey(new Date());
+    var byWeek = {};
+    state.entries.forEach(function(e){
+      if (e.typ === 'vormerkung' && e.weekKey > nowKey){
+        (byWeek[e.weekKey] = byWeek[e.weekKey] || []).push(e);
+      }
+    });
+    var keys = Object.keys(byWeek).sort();
+    var card = document.getElementById('upcomingCard');
+    var listEl = document.getElementById('upcomingList');
+    listEl.innerHTML = "";
+    card.classList.toggle('hidden', keys.length === 0);
+    keys.forEach(function(wk){
+      var items = byWeek[wk];
+      var sum = items.reduce(function(s,e){return s+e.amount;},0);
+      var btn = document.createElement('button');
+      btn.className = 'upcoming-row';
+      btn.setAttribute('data-goto-week', wk);
+      btn.innerHTML =
+        '<div><div class="u-title">'+escapeHtml(weekTitle(wk))+'</div>'+
+        '<div class="u-sub">'+escapeHtml(weekRangeLabel(wk))+' · '+items.length+(items.length===1?' Vormerkung':' Vormerkungen')+' · noch frei: '+fmtEURshort(weekly - sum)+'</div></div>'+
+        '<div style="display:flex;align-items:center;"><span class="u-amt">~ '+fmtEUR(sum)+'</span><span class="u-chev">›</span></div>';
+      listEl.appendChild(btn);
+    });
+  }
+
+  function goToWeek(key){
+    state.currentWeekKey = key;
+    renderHome(); renderStats();
   }
 
   function escapeHtml(s){
@@ -837,17 +954,50 @@
     if (!b) return;
     ensureMeDefault();
     state.pendingType = 'ausgabe';
+    // Standard: heute. Betrachtet man gerade eine andere Woche, wird deren Montag/heute vorbelegt.
+    var viewDiff = weekDiffFromNow(state.currentWeekKey);
+    state.pendingDate = viewDiff > 0 ? toISODate(weekMonday(state.currentWeekKey)) : toISODate(new Date());
     state.pendingCat = (b.categories||DEFAULT_CATS)[0];
     state.pendingPerson = state.me;
     document.getElementById('amountInput').value = '';
     document.getElementById('ortInput').value = '';
     document.getElementById('zweckInput').value = '';
-    document.getElementById('typeAusgabeBtn').classList.add('active');
-    document.getElementById('typeVormerkungBtn').classList.remove('active');
+    document.getElementById('datumInput').value = state.pendingDate;
+    applyDateToSheet();
     renderChipsInSheet();
     document.getElementById('addBackdrop').classList.add('show');
     document.getElementById('addSheet').classList.add('show');
     setTimeout(function(){ document.getElementById('amountInput').focus(); }, 300);
+  }
+  function isFutureWeekDate(iso){
+    var d = parseISODate(iso);
+    return !!d && isoWeekKey(d) > isoWeekKey(new Date());
+  }
+  function setPendingTypeUI(type){
+    state.pendingType = type;
+    document.getElementById('typeAusgabeBtn').classList.toggle('active', type==='ausgabe');
+    document.getElementById('typeVormerkungBtn').classList.toggle('active', type==='vormerkung');
+  }
+  // Datum geändert: Hinweis aktualisieren, Typ bei späteren Wochen automatisch auf "Vormerkung"
+  function applyDateToSheet(){
+    var iso = state.pendingDate;
+    var d = parseISODate(iso);
+    var hint = document.getElementById('datumHint');
+    hint.className = 'date-hint';
+    if (!d){ hint.textContent = ''; setPendingTypeUI(state.pendingType); return; }
+    var key = isoWeekKey(d);
+    var diff = weekDiffFromNow(key);
+    if (diff > 0){
+      setPendingTypeUI('vormerkung');
+      hint.classList.add('future');
+      hint.textContent = weekTitle(key) + ' (' + weekRangeLabel(key) + ') – wird als Vormerkung gespeichert und mindert das Budget dieser Woche.';
+    } else if (diff < 0){
+      setPendingTypeUI(state.pendingType);
+      hint.textContent = 'Liegt in einer vergangenen Woche (' + weekTitle(key) + ').';
+    } else {
+      setPendingTypeUI(state.pendingType);
+      hint.textContent = 'Diese Woche · ' + d.toLocaleDateString('de-DE',{weekday:'long', day:'2-digit', month:'2-digit'});
+    }
   }
   function closeSheet(){
     document.getElementById('addBackdrop').classList.remove('show');
@@ -881,24 +1031,41 @@
     if (!amt || amt <= 0){ toast('Bitte einen Betrag eingeben'); return; }
     if (!state.pendingCat){ toast('Bitte eine Kategorie wählen'); return; }
     var now = new Date();
+    var when = parseISODate(state.pendingDate) || now;
+    var typ = state.pendingType;
+    if (isoWeekKey(when) > isoWeekKey(now)) typ = 'vormerkung';   // spätere Wochen: nur Vormerkung
     var entry = {
       amount: amt,
       ort: document.getElementById('ortInput').value.trim(),
       zweck: document.getElementById('zweckInput').value.trim(),
       kategorie: state.pendingCat,
-      typ: state.pendingType,
+      typ: typ,
       person: state.pendingPerson || state.me || (b.people||DEFAULT_PEOPLE)[0],
-      weekKey: isoWeekKey(now),
-      monthKey: monthKey(now),
+      datum: toISODate(when),
+      weekKey: isoWeekKey(when),
+      monthKey: monthKey(when),
       createdAt: now.toISOString()
     };
     state.db.collection('budgets/'+state.currentBudgetId+'/entries').add(entry).then(function(){
-      toast('Gespeichert');
+      toast(typ==='vormerkung' && isoWeekKey(when) > isoWeekKey(now) ? 'Vorgemerkt für ' + weekTitle(isoWeekKey(when)) : 'Gespeichert');
       closeSheet();
     }).catch(function(err){
       console.error(err);
       toast('Fehler beim Speichern');
     });
+  }
+
+  // Vormerkung -> echte Ausgabe (Betrag kann dabei an den tatsächlichen Preis angepasst werden)
+  function markPaid(id){
+    var e = state.entries.filter(function(x){ return x.id === id; })[0];
+    if (!e) return;
+    var input = prompt('Tatsächlich bezahlter Betrag in €:', String(e.amount).replace('.',','));
+    if (input === null) return;
+    var amt = parseFloat(String(input).replace(',','.'));
+    if (!amt || amt <= 0){ toast('Bitte einen gültigen Betrag eingeben'); return; }
+    state.db.doc('budgets/'+state.currentBudgetId+'/entries/'+id).update({typ:'ausgabe', amount:amt}).then(function(){
+      toast('Als bezahlt verbucht');
+    }).catch(function(err){ console.error(err); toast('Fehler beim Speichern'); });
   }
 
   function deleteEntry(id){
@@ -1009,12 +1176,32 @@
   document.getElementById('addBackdrop').addEventListener('click', closeSheet);
   document.getElementById('saveEntryBtn').addEventListener('click', saveEntry);
   document.getElementById('typeAusgabeBtn').addEventListener('click', function(){
-    state.pendingType='ausgabe'; this.classList.add('active'); document.getElementById('typeVormerkungBtn').classList.remove('active');
+    if (isFutureWeekDate(state.pendingDate)){ toast('Für spätere Wochen ist nur „Vormerkung" möglich'); return; }
+    setPendingTypeUI('ausgabe');
   });
-  document.getElementById('typeVormerkungBtn').addEventListener('click', function(){
-    state.pendingType='vormerkung'; this.classList.add('active'); document.getElementById('typeAusgabeBtn').classList.remove('active');
+  document.getElementById('typeVormerkungBtn').addEventListener('click', function(){ setPendingTypeUI('vormerkung'); });
+  document.getElementById('datumInput').addEventListener('change', function(){
+    state.pendingDate = this.value || toISODate(new Date());
+    applyDateToSheet();
+  });
+  document.getElementById('datumChips').addEventListener('click', function(e){
+    var btn = e.target.closest('[data-weeks]');
+    if (!btn) return;
+    var d = new Date(); d.setDate(d.getDate() + 7*parseInt(btn.getAttribute('data-weeks'),10));
+    state.pendingDate = toISODate(d);
+    document.getElementById('datumInput').value = state.pendingDate;
+    applyDateToSheet();
+  });
+  document.getElementById('weekPrevBtn').addEventListener('click', function(){ goToWeek(shiftWeekKey(state.currentWeekKey, -1)); });
+  document.getElementById('weekNextBtn').addEventListener('click', function(){ goToWeek(shiftWeekKey(state.currentWeekKey, 1)); });
+  document.getElementById('weekTodayBtn').addEventListener('click', function(){ goToWeek(isoWeekKey(new Date())); });
+  document.getElementById('upcomingList').addEventListener('click', function(e){
+    var row = e.target.closest('[data-goto-week]');
+    if (row) goToWeek(row.getAttribute('data-goto-week'));
   });
   document.getElementById('weekList').addEventListener('click', function(e){
+    var paidId = e.target.getAttribute('data-paid');
+    if (paidId){ markPaid(paidId); return; }
     var id = e.target.getAttribute('data-id');
     if (id) deleteEntry(id);
   });
