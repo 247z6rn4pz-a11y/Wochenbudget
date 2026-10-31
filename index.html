@@ -204,6 +204,14 @@
   .upcoming-row .u-sub{font-size:12px; color:var(--text-secondary); margin-top:1px;}
   .upcoming-row .u-amt{font-size:15px; font-weight:700; color:var(--accent-orange); font-variant-numeric:tabular-nums; flex-shrink:0;}
   .upcoming-row .u-chev{color:var(--text-tertiary); font-size:16px; margin-left:4px;}
+  .fc-row{width:100%; background:none; border:none; border-bottom:0.5px solid var(--separator); padding:10px 0; text-align:left; color:var(--text); font-family:inherit; display:block;}
+  .fc-row:last-child{border-bottom:none;}
+  .fc-top{display:flex; justify-content:space-between; align-items:baseline; gap:8px; margin-bottom:6px;}
+  .fc-top .fc-wk{font-size:14px; font-weight:600;}
+  .fc-top .fc-wk small{font-weight:500; color:var(--text-tertiary); font-size:12px; margin-left:4px;}
+  .fc-top .fc-free{white-space:nowrap; flex-shrink:0; font-size:13px; font-weight:600; font-variant-numeric:tabular-nums; color:var(--text-secondary);}
+  .fc-top .fc-free.neg{color:var(--accent-red);}
+  .fc-sub{font-size:11px; color:var(--text-tertiary); margin-top:4px;}
   .sync-dot{width:7px; height:7px; border-radius:50%; background:var(--accent-green); display:inline-block; margin-left:6px;}
   .sync-dot.off{background:var(--text-tertiary);}
 </style>
@@ -254,9 +262,10 @@
         <div id="weekList"></div>
       </div>
 
-      <div class="card hidden" id="upcomingCard">
-        <h2>Kommende Wochen · Vormerkungen</h2>
+      <div class="card" id="upcomingCard">
+        <h2 id="upcomingTitle">Kommende Wochen · Vormerkungen</h2>
         <div id="upcomingList"></div>
+        <button class="btn-secondary" id="upcomingToggleBtn" style="margin-top:8px;">Vorausschau: nächste 15 Wochen</button>
       </div>
     </section>
 
@@ -590,7 +599,8 @@
     renderUpcoming();
   }
 
-  // Übersicht der kommenden Wochen mit Vormerkungen (alles nach der aktuellen Kalenderwoche)
+  // Kommende Wochen: standardmäßig nur Wochen mit Vormerkungen, per Knopf die volle 15-Wochen-Vorausschau
+  var FORECAST_WEEKS = 15;
   function renderUpcoming(){
     var b = currentBudget();
     var weekly = b ? (b.weeklyAmount || 0) : 0;
@@ -601,11 +611,37 @@
         (byWeek[e.weekKey] = byWeek[e.weekKey] || []).push(e);
       }
     });
-    var keys = Object.keys(byWeek).sort();
-    var card = document.getElementById('upcomingCard');
+    var full = !!state.showForecast;
     var listEl = document.getElementById('upcomingList');
     listEl.innerHTML = "";
-    card.classList.toggle('hidden', keys.length === 0);
+    document.getElementById('upcomingTitle').textContent = full ? 'Vorausschau · nächste ' + FORECAST_WEEKS + ' Wochen' : 'Kommende Wochen · Vormerkungen';
+    document.getElementById('upcomingToggleBtn').textContent = full ? 'Nur Wochen mit Vormerkungen zeigen' : 'Vorausschau: nächste ' + FORECAST_WEEKS + ' Wochen';
+
+    if (full){
+      for (var i = 1; i <= FORECAST_WEEKS; i++){
+        var wk = shiftWeekKey(nowKey, i);
+        var items = byWeek[wk] || [];
+        var sum = items.reduce(function(s,e){return s+e.amount;},0);
+        var free = weekly - sum;
+        var pct = weekly > 0 ? Math.min(100, (sum/weekly)*100) : 0;
+        var row = document.createElement('button');
+        row.className = 'fc-row';
+        row.setAttribute('data-goto-week', wk);
+        row.innerHTML =
+          '<div class="fc-top"><span class="fc-wk">KW '+weekNo(wk)+'<small>'+escapeHtml(weekRangeLabel(wk))+'</small></span>'+
+          '<span class="fc-free'+(free<0?' neg':'')+'">'+(items.length ? '~ '+fmtEURshort(sum)+' vorgemerkt · ' : '')+'frei '+fmtEURshort(free)+'</span></div>'+
+          '<div class="bar-track"><div class="bar-fill" style="width:'+pct+'%; background:'+(free<0?'#ff3b30':'#ff9500')+'"></div></div>'+
+          (items.length ? '<div class="fc-sub">'+items.map(function(e){ return escapeHtml((e.ort||e.kategorie)+' '+fmtEURshort(e.amount)); }).join(' · ')+'</div>' : '');
+        listEl.appendChild(row);
+      }
+      return;
+    }
+
+    var keys = Object.keys(byWeek).sort();
+    if (!keys.length){
+      listEl.innerHTML = '<div class="empty" style="padding:14px 0;">Noch nichts für kommende Wochen vorgemerkt</div>';
+      return;
+    }
     keys.forEach(function(wk){
       var items = byWeek[wk];
       var sum = items.reduce(function(s,e){return s+e.amount;},0);
@@ -1195,6 +1231,10 @@
   document.getElementById('weekPrevBtn').addEventListener('click', function(){ goToWeek(shiftWeekKey(state.currentWeekKey, -1)); });
   document.getElementById('weekNextBtn').addEventListener('click', function(){ goToWeek(shiftWeekKey(state.currentWeekKey, 1)); });
   document.getElementById('weekTodayBtn').addEventListener('click', function(){ goToWeek(isoWeekKey(new Date())); });
+  document.getElementById('upcomingToggleBtn').addEventListener('click', function(){
+    state.showForecast = !state.showForecast;
+    renderUpcoming();
+  });
   document.getElementById('upcomingList').addEventListener('click', function(e){
     var row = e.target.closest('[data-goto-week]');
     if (row) goToWeek(row.getAttribute('data-goto-week'));
