@@ -84,6 +84,9 @@
   .list-row .paid{background:rgba(52,199,89,0.15); border:none; color:#1f8a3d; font-size:12px; font-weight:700; padding:6px 9px; border-radius:12px; flex-shrink:0; white-space:nowrap;}
   .list-row .paid:active{opacity:0.6;}
   .list-row .del{background:none;border:none;color:var(--accent-red); font-size:13px; padding:4px 6px; flex-shrink:0;}
+  .list-row.editable{cursor:pointer; -webkit-tap-highlight-color:transparent; border-radius:10px;}
+  .list-row.editable:active{background:var(--fill);}
+  .list-row .edit-hint{color:var(--text-secondary); font-size:15px; flex-shrink:0; opacity:0.6;}
   .empty{text-align:center; color:var(--text-tertiary); font-size:14px; padding:24px 0;}
 
   .shop-row{display:flex; align-items:center; gap:12px; padding:12px 0; border-bottom:0.5px solid var(--separator); transition:opacity 0.35s ease, transform 0.35s ease;}
@@ -396,7 +399,7 @@
 <div class="sheet-backdrop" id="addBackdrop"></div>
 <div class="sheet" id="addSheet">
   <div class="sheet-handle"></div>
-  <div class="sheet-title">Neue Buchung</div>
+  <div class="sheet-title" id="sheetTitle">Neue Buchung</div>
 
   <div class="type-toggle">
     <button data-type="ausgabe" class="active" id="typeAusgabeBtn">Ausgabe jetzt</button>
@@ -430,7 +433,8 @@
   <div class="chip-row" id="personChips"></div>
 
   <button class="btn-primary" id="saveEntryBtn">Speichern</button>
-  <button class="btn-text-danger" id="cancelEntryBtn">Abbrechen</button>
+  <button class="btn-text-danger hidden" id="deleteEntryBtn">Eintrag löschen</button>
+  <button class="btn-text-danger" id="cancelEntryBtn" style="color:var(--text-secondary);">Abbrechen</button>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -583,7 +587,9 @@
         return ((b2.datum||"") + (b2.createdAt||"")).localeCompare((a.datum||"") + (a.createdAt||""));
       }).forEach(function(e){
         var row = document.createElement('div');
-        row.className = 'list-row';
+        row.className = 'list-row editable';
+        row.setAttribute('data-edit', e.id);
+        row.title = 'Tippen zum Bearbeiten';
         var d = e.datum ? parseISODate(e.datum) : (e.createdAt ? new Date(e.createdAt) : null);
         var dateStr = d ? d.toLocaleDateString('de-DE',{weekday:'short', day:'2-digit', month:'2-digit'}) : "";
         row.innerHTML =
@@ -995,6 +1001,9 @@
     state.pendingDate = viewDiff > 0 ? toISODate(weekMonday(state.currentWeekKey)) : toISODate(new Date());
     state.pendingCat = (b.categories||DEFAULT_CATS)[0];
     state.pendingPerson = state.me;
+    state.editingId = null;
+    document.getElementById('sheetTitle').textContent = 'Neue Buchung';
+    document.getElementById('deleteEntryBtn').classList.add('hidden');
     document.getElementById('amountInput').value = '';
     document.getElementById('ortInput').value = '';
     document.getElementById('zweckInput').value = '';
@@ -1004,6 +1013,27 @@
     document.getElementById('addBackdrop').classList.add('show');
     document.getElementById('addSheet').classList.add('show');
     setTimeout(function(){ document.getElementById('amountInput').focus(); }, 300);
+  }
+  // Bestehenden Eintrag im selben Fenster öffnen – alle Felder vorausgefüllt
+  function openEditSheet(id){
+    var b = currentBudget();
+    var e = state.entries.filter(function(x){ return x.id === id; })[0];
+    if (!b || !e) return;
+    state.editingId = id;
+    state.pendingType = e.typ || 'ausgabe';
+    state.pendingDate = e.datum || (e.createdAt ? toISODate(new Date(e.createdAt)) : toISODate(new Date()));
+    state.pendingCat = e.kategorie || (b.categories||DEFAULT_CATS)[0];
+    state.pendingPerson = e.person || state.me;
+    document.getElementById('sheetTitle').textContent = 'Buchung bearbeiten';
+    document.getElementById('deleteEntryBtn').classList.remove('hidden');
+    document.getElementById('amountInput').value = String(Math.round(e.amount*100)/100);
+    document.getElementById('ortInput').value = e.ort || '';
+    document.getElementById('zweckInput').value = e.zweck || '';
+    document.getElementById('datumInput').value = state.pendingDate;
+    applyDateToSheet();
+    renderChipsInSheet();
+    document.getElementById('addBackdrop').classList.add('show');
+    document.getElementById('addSheet').classList.add('show');
   }
   function isFutureWeekDate(iso){
     var d = parseISODate(iso);
@@ -1082,6 +1112,16 @@
       monthKey: monthKey(when),
       createdAt: now.toISOString()
     };
+    if (state.editingId){
+      delete entry.createdAt;               // ursprünglicher Erfassungszeitpunkt bleibt erhalten
+      entry.updatedAt = now.toISOString();
+      state.db.doc('budgets/'+state.currentBudgetId+'/entries/'+state.editingId).update(entry).then(function(){
+        toast('Änderung gespeichert');
+        state.editingId = null;
+        closeSheet();
+      }).catch(function(err){ console.error(err); toast('Fehler beim Speichern'); });
+      return;
+    }
     state.db.collection('budgets/'+state.currentBudgetId+'/entries').add(entry).then(function(){
       toast(typ==='vormerkung' && isoWeekKey(when) > isoWeekKey(now) ? 'Vorgemerkt für ' + weekTitle(isoWeekKey(when)) : 'Gespeichert');
       closeSheet();
@@ -1211,6 +1251,14 @@
   document.getElementById('cancelEntryBtn').addEventListener('click', closeSheet);
   document.getElementById('addBackdrop').addEventListener('click', closeSheet);
   document.getElementById('saveEntryBtn').addEventListener('click', saveEntry);
+  document.getElementById('deleteEntryBtn').addEventListener('click', function(){
+    if (!state.editingId) return;
+    if (!confirm('Diesen Eintrag wirklich löschen?')) return;
+    deleteEntry(state.editingId);
+    state.editingId = null;
+    closeSheet();
+    toast('Gelöscht');
+  });
   document.getElementById('typeAusgabeBtn').addEventListener('click', function(){
     if (isFutureWeekDate(state.pendingDate)){ toast('Für spätere Wochen ist nur „Vormerkung" möglich'); return; }
     setPendingTypeUI('ausgabe');
@@ -1243,7 +1291,9 @@
     var paidId = e.target.getAttribute('data-paid');
     if (paidId){ markPaid(paidId); return; }
     var id = e.target.getAttribute('data-id');
-    if (id) deleteEntry(id);
+    if (id){ deleteEntry(id); return; }
+    var row = e.target.closest('[data-edit]');
+    if (row) openEditSheet(row.getAttribute('data-edit'));
   });
   document.querySelectorAll('#statsRange button').forEach(function(btn){
     btn.addEventListener('click', function(){
